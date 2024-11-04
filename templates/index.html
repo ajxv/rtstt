@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Speech Transcription</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .container {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        #transcription-box {
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        #startBtn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        #stopBtn {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Real-time Speech Transcription</h1>
+        
+        <div class="controls">
+            <button id="startBtn">Start Recording</button>
+            <button id="stopBtn" disabled>Stop Recording</button>
+        </div>
+        
+        <div class="status" id="status">Status: Ready</div>
+        
+        <div id="transcription-box"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const transcriptionBox = document.getElementById('transcription-box');
+        
+        startBtn.addEventListener('click', () => {
+            socket.emit('start_recording');
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            status.textContent = 'Status: Recording...';
+        });
+        
+        stopBtn.addEventListener('click', () => {
+            socket.emit('stop_recording');
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Status: Stopped';
+        });
+        
+        socket.on('transcription', (data) => {
+            const p = document.createElement('p');
+            p.textContent = data.text;
+            transcriptionBox.appendChild(p);
+            transcriptionBox.scrollTop = transcriptionBox.scrollHeight;
+        });
+        
+        socket.on('connect', () => {
+            status.textContent = 'Status: Connected';
+        });
+        
+        socket.on('disconnect', () => {
+            status.textContent = 'Status: Disconnected';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        });
+    </script>
+</body>
+</html>

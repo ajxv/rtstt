@@ -1,0 +1,1 @@
+# Real Time Speech To Text (Using OpenAi Whisper)
