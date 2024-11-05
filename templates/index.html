@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
+    <!-- Previous head content remains the same -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-time Speech Transcription</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <!-- Previous styles remain the same -->
     <style>
-        /* Basic page styling */
+        /* All previous styles remain unchanged */
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
@@ -15,7 +16,6 @@
             padding: 20px;
         }
 
-        /* Container for all content */
         .container {
             background-color: #f5f5f5;
             border-radius: 8px;
@@ -23,7 +23,6 @@
             margin-top: 20px;
         }
 
-        /* Styling for transcription box */
         #transcription-box {
             min-height: 200px;
             max-height: 400px;
@@ -35,7 +34,6 @@
             margin: 20px 0;
         }
 
-        /* Styling for control buttons */
         .controls {
             display: flex;
             justify-content: center;
@@ -71,7 +69,6 @@
             cursor: not-allowed;
         }
 
-        /* Status message styling */
         .status {
             text-align: center;
             margin-top: 10px;
@@ -82,55 +79,161 @@
 </head>
 
 <body>
+    <!-- Previous body content remains the same -->
     <div class="container">
         <h1 style="text-align: center;">Real-time Speech Transcription</h1>
 
-        <!-- Controls for start and stop recording -->
         <div class="controls">
             <button id="startBtn">Start Recording</button>
             <button id="stopBtn" disabled>Stop Recording</button>
         </div>
 
-        <!-- Status message area -->
         <div class="status" id="status">Status: Ready</div>
-
-        <!-- Box to display transcriptions -->
         <div id="transcription-box"></div>
     </div>
 
     <script>
-        // Initialize Socket.IO client
         const socket = io();
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const status = document.getElementById('status');
         const transcriptionBox = document.getElementById('transcription-box');
 
-        // Start recording event
-        startBtn.addEventListener('click', () => {
+        let mediaRecorder;
+        let audioContext;
+        let audioStream;
+        let processor;
+        let source;
+        let resamplingNode;
+        const targetSampleRate = 16000;
+        
+        async function setupAudio() {
+            try {
+                // Get audio stream with default sample rate
+                audioStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+
+                // Create audio context with native sample rate
+                audioContext = new AudioContext();
+                const nativeSampleRate = audioContext.sampleRate;
+                
+                source = audioContext.createMediaStreamSource(audioStream);
+                
+                // Create offline context for resampling if needed
+                if (nativeSampleRate !== targetSampleRate) {
+                    const resampleRatio = targetSampleRate / nativeSampleRate;
+                    const bufferSize = 4096;
+                    processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+                    
+                    processor.onaudioprocess = (e) => {
+                        if (!startBtn.disabled) return;
+                        
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        // Resample data
+                        const resampledBuffer = new Float32Array(Math.ceil(inputData.length * resampleRatio));
+                        for (let i = 0; i < resampledBuffer.length; i++) {
+                            const index = Math.floor(i / resampleRatio);
+                            resampledBuffer[i] = inputData[index];
+                        }
+                        
+                        const chunk = convertFloat32ToBase64(resampledBuffer);
+                        socket.emit('audio_data', { audio_chunk: chunk });
+                    };
+                } else {
+                    // No resampling needed
+                    processor = audioContext.createScriptProcessor(4096, 1, 1);
+                    processor.onaudioprocess = (e) => {
+                        if (!startBtn.disabled) return;
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const chunk = convertFloat32ToBase64(inputData);
+                        socket.emit('audio_data', { audio_chunk: chunk });
+                    };
+                }
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
+                console.log(`Audio initialized - Native sample rate: ${nativeSampleRate}Hz, Target: ${targetSampleRate}Hz`);
+                status.textContent = 'Status: Microphone ready';
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                status.textContent = 'Status: Error accessing microphone';
+            }
+        }
+
+        function cleanupAudio() {
+            if (processor) {
+                processor.disconnect();
+                processor.onaudioprocess = null;
+                processor = null;
+            }
+            
+            if (source) {
+                source.disconnect();
+                source = null;
+            }
+
+            if (resamplingNode) {
+                resamplingNode.disconnect();
+                resamplingNode = null;
+            }
+
+            if (audioContext) {
+                audioContext.close().catch(console.error);
+                audioContext = null;
+            }
+
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => {
+                    track.stop();
+                });
+                audioStream = null;
+            }
+        }
+
+        function convertFloat32ToBase64(float32Array) {
+            const buffer = new ArrayBuffer(float32Array.length * 4);
+            const view = new DataView(buffer);
+            for (let i = 0; i < float32Array.length; i++) {
+                view.setFloat32(i * 4, float32Array[i], true);
+            }
+            const bytes = new Uint8Array(buffer);
+            return btoa(String.fromCharCode.apply(null, bytes));
+        }
+
+        startBtn.addEventListener('click', async () => {
+            if (!audioContext) {
+                await setupAudio();
+            } else if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
             socket.emit('start_recording');
             startBtn.disabled = true;
             stopBtn.disabled = false;
             status.textContent = 'Status: Recording...';
         });
 
-        // Stop recording event
         stopBtn.addEventListener('click', () => {
             socket.emit('stop_recording');
             startBtn.disabled = false;
             stopBtn.disabled = true;
             status.textContent = 'Status: Stopped';
+            cleanupAudio();
         });
 
-        // Handle incoming transcription data
         socket.on('transcription', (data) => {
             const p = document.createElement('p');
             p.textContent = data.text;
             transcriptionBox.appendChild(p);
-            transcriptionBox.scrollTop = transcriptionBox.scrollHeight;  // Auto-scroll
+            transcriptionBox.scrollTop = transcriptionBox.scrollHeight;
         });
 
-        // Connection status updates
         socket.on('connect', () => {
             status.textContent = 'Status: Connected';
         });
@@ -139,8 +242,12 @@
             status.textContent = 'Status: Disconnected';
             startBtn.disabled = false;
             stopBtn.disabled = true;
+            cleanupAudio();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            cleanupAudio();
         });
     </script>
 </body>
-
 </html>
