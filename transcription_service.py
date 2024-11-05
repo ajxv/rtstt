@@ -1,10 +1,10 @@
 # transcription_service.py
-import sounddevice as sd
 import numpy as np
 import threading
 import queue
 import whisper
 import time
+import logging
 from typing import Callable, Optional
 
 class TranscriptionService:
@@ -13,92 +13,86 @@ class TranscriptionService:
         Initialize the transcription service.
         
         Args:
-            callback_fn: Function to call with transcribed text
+            callback_fn: Function to call with transcribed text.
         """
         # Audio parameters
         self.SAMPLE_RATE = 16000
-        self.CHANNELS = 1
-        self.CHUNK_DURATION = 1
-        self.CHUNK_SIZE = int(self.SAMPLE_RATE * self.CHUNK_DURATION)
-        self.ENERGY_THRESHOLD = 0.002
-        
+        self.ENERGY_THRESHOLD = 0.002  # Adjust for ambient noise
+
         # State management
         self.is_recording = False
         self.audio_queue = queue.Queue()
-        self.recording_thread: Optional[threading.Thread] = None
-        self.stream: Optional[sd.InputStream] = None
         self.callback_fn = callback_fn
-        
-        # Initialize Whisper model
+        self.processing_thread = None
+
+        # Initialize the Whisper model
         self.model = whisper.load_model("small")
+        logging.info("Whisper model loaded successfully.")
 
-    def audio_callback(self, indata, frames, time, status):
-        """Handle incoming audio data."""
-        if status:
-            print(f"Status: {status}")
+    def process_audio_chunk(self, audio_chunk: np.ndarray):
+        """
+        Process incoming audio chunk from the client.
+        
+        Args:
+            audio_chunk (np.ndarray): Audio data as numpy array
+        """
         if self.is_recording:
-            self.audio_queue.put(indata.copy().flatten().astype(np.float32))
+            self.audio_queue.put(audio_chunk)
 
-    def transcribe_audio(self):
-        """Process audio from queue and transcribe using Whisper."""
+    def process_queue(self):
+        """Processes queued audio chunks and transcribes them using Whisper."""
         last_transcription_time = 0
-        min_gap = 0.75
-
+        min_gap = 0.75  # Minimum gap in seconds between transcriptions
+        
         while self.is_recording:
             if not self.audio_queue.empty():
-                audio_data = []
+                # Collect all available audio chunks
+                chunks = []
                 while not self.audio_queue.empty():
-                    audio_data.append(self.audio_queue.get())
+                    chunks.append(self.audio_queue.get())
                 
-                audio_chunk = np.concatenate(audio_data, axis=0).astype(np.float32)
+                audio_data = np.concatenate(chunks)
 
-                if (np.mean(np.abs(audio_chunk)) > self.ENERGY_THRESHOLD and 
+                # Check audio volume and timing for transcription
+                if (np.mean(np.abs(audio_data)) > self.ENERGY_THRESHOLD and
                     (time.time() - last_transcription_time) > min_gap):
                     
                     last_transcription_time = time.time()
-                    result = self.model.transcribe(
-                        audio_chunk, 
-                        language='en', 
-                        without_timestamps=True
-                    )
+                    result = self.model.transcribe(audio_data, language='en', without_timestamps=True)
                     transcribed_text = result['text'].strip()
                     
                     if transcribed_text:
+                        logging.info(f"Transcribed Text: {transcribed_text}")
                         self.callback_fn(transcribed_text)
+            
+            time.sleep(0.1)  # Prevent busy-waiting
 
     def start(self):
-        """Start the transcription service."""
+        """Starts the transcription processing thread."""
         if not self.is_recording:
             self.is_recording = True
-            self.recording_thread = threading.Thread(
-                target=self.transcribe_audio, 
-                daemon=True
-            )
-            self.recording_thread.start()
-            
-            self.stream = sd.InputStream(
-                channels=self.CHANNELS,
-                samplerate=self.SAMPLE_RATE,
-                callback=self.audio_callback
-            )
-            self.stream.start()
+            self.processing_thread = threading.Thread(target=self.process_queue, daemon=True)
+            self.processing_thread.start()
+            logging.info("Transcription service started.")
             return True
+        
+        logging.warning("Transcription service is already running.")
         return False
 
     def stop(self):
-        """Stop the transcription service."""
+        """Stops the transcription processing."""
         if self.is_recording:
             self.is_recording = False
-            if self.stream:
-                self.stream.stop()
-                self.stream.close()
-                self.stream = None
-            if self.recording_thread:
-                self.recording_thread.join()
+            if self.processing_thread:
+                self.processing_thread.join(timeout=1.0)
+            self.audio_queue.queue.clear()
+            logging.info("Transcription service stopped.")
             return True
+        
+        logging.warning("Transcription service is not running.")
         return False
 
     def __del__(self):
-        """Cleanup resources."""
-        if self.is_recording:
-            self.stop()
+        """Ensures resources are cleaned up if the service is deleted."""
+        self.stop()
+        logging.info("Transcription service cleaned up.")
