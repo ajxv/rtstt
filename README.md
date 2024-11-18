@@ -9,6 +9,9 @@
 ## Running the Application
 - Run the flask app using `python3 app.py`
 
+## Demo
+![sample](https://github.com/user-attachments/assets/90d45012-5f1d-4fc1-b72d-5a47c3eb4c63)
+
 ## To-Dos
 - [ ] Improve accuracy of transcription
 - [ ] Add support for multiple languages
