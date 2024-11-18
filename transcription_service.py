@@ -26,7 +26,15 @@ class TranscriptionService:
         self.processing_thread = None
 
         # Initialize the Whisper model
-        self.model = whisper.load_model("small")
+        # Available models: tiny, base, small, medium, large
+        # - tiny: Fastest but least accurate
+        # - base: A balance between speed and accuracy
+        # - small: More accurate, slower than base
+        # - medium: Even more accurate, slower than small
+        # - large: Most accurate but slowest
+        # https://github.com/openai/whisper?tab=readme-ov-file#available-models-and-languages
+        
+        self.model = whisper.load_model("medium")
         logging.info("Whisper model loaded successfully.")
 
     def process_audio_chunk(self, audio_chunk: np.ndarray):

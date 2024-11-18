@@ -5,7 +5,6 @@ from transcription_service import TranscriptionService
 import logging
 import base64
 import numpy as np
-import socket
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -13,19 +12,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 # Initialize Flask app and Socket.IO
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Allow external connections
-
-def get_ip():
-    """Get the local IP address of the machine."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        # doesn't need to be reachable
-        s.connect(('10.255.255.255', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
 
 def emit_transcription(text: str):
     """Emit transcribed text to the connected client via Socket.IO."""
@@ -71,8 +57,5 @@ def handle_disconnect():
     logging.info("Client disconnected. Transcription stopped.")
 
 if __name__ == '__main__':
-    host = get_ip()
     port = 5000
-    print(f"Server running at http://{host}:{port}")
     socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True)
-    logging.info(f"Server started on {host}:{port}")
